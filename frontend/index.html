@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Server Monitoring Dashboard</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="container">
+      <header class="topbar">
+        <div class="title-row">
+          <div>
+            <p class="eyebrow">Infrastructure</p>
+            <h1>Server Monitoring</h1>
+          </div>
+          <div class="status-strip">
+            <span class="live-dot"></span>
+            <span>Live</span>
+            <span class="timestamp" id="last-updated">Last updated: --:--:--</span>
+          </div>
+        </div>
+
+        <div class="summary-grid">
+          <div class="summary-card">
+            <span class="summary-label">Total Servers</span>
+            <strong id="total-servers">0</strong>
+          </div>
+          <div class="summary-card success">
+            <span class="summary-label">Healthy</span>
+            <strong id="healthy-servers">0</strong>
+          </div>
+          <div class="summary-card warning">
+            <span class="summary-label">Warnings</span>
+            <strong id="warning-servers">0</strong>
+          </div>
+          <div class="summary-card danger">
+            <span class="summary-label">Offline</span>
+            <strong id="offline-servers">0</strong>
+          </div>
+        </div>
+      </header>
+
+      <main>
+        <section id="server-list" class="server-grid" aria-live="polite"></section>
+      </main>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="script.js"></script>
+  </body>
+</html>
