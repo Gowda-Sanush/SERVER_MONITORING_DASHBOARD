@@ -1,3 +1,4 @@
+# simple docker file
 FROM nginx:alpine
 COPY frontend /usr/share/nginx/html/app
 COPY data /usr/share/nginx/html/data
