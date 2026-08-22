@@ -1,0 +1,28 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: infra-monitor-dash
+  labels:
+    app: infra-monitor-dash
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: infra
+  template:
+    metadata:
+      labels:
+        app: infra
+    spec:
+      containers:
+      # infra-monitor-dashboard app image exists in the ECR registry and is pulled from there
+        - name: infra-monitor-app
+          image: 355718663378.dkr.ecr.ap-south-1.amazonaws.com/infra-monitoring/dashboard:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 80
+          env:
+            - name: NODE_ENV
+              value: "production"
+      imagePullSecrets:
+        - name: ecr-registry-secret
