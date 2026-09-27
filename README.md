@@ -47,28 +47,25 @@ These classifications are currently based on simulated browser values and should
 ## Architecture
 
 ```text
-			AWS Container Registry
-		ECR: infra-monitoring/dashboard:latest
-				  |
-				  v
-			    Kubernetes
-				  |
-		   +------------+------------+
-		   |                         |
-	   Nginx Ingress              ECR pull Secret
-		   |                         |
-		   v                         |
-	Kubernetes Service :8080            |
-		   |                         |
-		   v                         |
-	Deployment: infra-monitor-dash      |
-		   |                         |
-		   v                         |
-	Nginx container :80                |
-	   /app/       /data/              |
-	      |           |                |
-	      v           v                |
-	Dashboard   servers.json
+Browser: http://<ALB-DNS>/app/
+                 |
+                 v
+Internet-facing AWS Application Load Balancer
+AWS Load Balancer Controller; IP targets
+                 |
+                 | Ingress path / -> Service port 8080
+                 v
+Service: infra-monitor-dash-service
+                 |
+                 | Pod target port 80
+                 v
+Deployment: infra-monitor-dash
+                 |
+                 v
+Nginx container
+  /app/ serves dashboard; /data/ serves servers.json
+
+Image source: ECR -> ECR image-pull Secret -> Kubernetes pod
 ```
 
 ## Repository Structure
@@ -81,9 +78,9 @@ server-monitoring-dashboard/
 │   ├── index.html             Dashboard markup
 │   ├── script.js              Data loading, status logic, and charts
 │   └── styles.css             Dashboard styling and responsive layout
-├── k8/
+├── k8/\
 │   ├── deployment.yml         Kubernetes pod and ECR image configuration
-│   ├── ingress.yml             Nginx Ingress routing
+│   ├── ingress.yml             AWS ALB Ingress routing
 │   ├── secret.yml              Kubernetes Docker registry Secret template
 │   └── service.yml             Internal service on port 8080
 ├── default.conf                Nginx routes for the app and data
@@ -106,7 +103,7 @@ server-monitoring-dashboard/
 - Docker for packaging the frontend and data files
 - Nginx Alpine as the web server inside the container
 - Kubernetes for deployment and service orchestration
-- Kubernetes Nginx Ingress for HTTP routing
+- AWS Load Balancer Controller and Application Load Balancer for HTTP routing
 - Amazon Elastic Container Registry (ECR) for storing and pulling the Docker image
 - AWS CLI for generating the ECR authentication password
 - `kubectl` for creating the registry Secret and applying Kubernetes manifests
@@ -141,7 +138,15 @@ The Nginx configuration redirects the root path to `/app/`, serves the dashboard
 
 ### Ingress
 
-`k8/ingress.yml` configures the Kubernetes Nginx Ingress controller to route requests from `/` to `infra-monitor-dash-service` on port 8080.
+`k8/ingress.yml` configures an internet-facing AWS Application Load Balancer through the AWS Load Balancer Controller. It uses the `alb` Ingress class and IP targets, and routes requests matching `/` to `infra-monitor-dash-service` on port 8080. The Service forwards traffic to the application pod on port 80. Nginx redirects `/` to `/app/`, where the dashboard is served.
+
+The AWS Load Balancer Controller must be installed in the cluster and configured with the required AWS IAM permissions; the Ingress manifest does not install or configure the controller. After the controller provisions the ALB, retrieve its DNS name with:
+
+```powershell
+kubectl get ingress infra-monitor-dash-ingress -n infra-monitoring
+```
+
+Open the dashboard at `http://<ADDRESS>/app/`, replacing `<ADDRESS>` with the Ingress address shown by `kubectl`. This manifest does not configure a hostname or TLS.
 
 ### ECR Secret
 
@@ -187,16 +192,16 @@ Then open `http://localhost:8000/frontend/`. The relative data request will reso
 
 ## AWS Services Explored
 
-The repository directly reflects the use of **Amazon ECR** for container image storage and Kubernetes image pulls. The deployment also reflects a broader AWS container workflow:
+The repository directly reflects the use of **Amazon ECR** for container image storage and **AWS Application Load Balancer** for inbound HTTP traffic. The deployment also reflects a broader AWS container workflow:
 
 - Build the application into a Docker image.
 - Tag the image for the ECR repository.
 - Authenticate Docker or Kubernetes to ECR using the AWS CLI.
 - Push the image to ECR.
 - Configure Kubernetes to pull the image with an image-pull Secret.
-- Run the application behind Kubernetes networking and an Ingress controller.
+- Route external HTTP traffic through an ALB managed by the AWS Load Balancer Controller.
 
-AWS services commonly associated with the next stage of this application include Amazon EKS for managed Kubernetes, Amazon CloudWatch for logs and metrics, IAM for least-privilege access, and Application Load Balancer integration for external traffic. These services are not provisioned by the current repository manifests.
+Amazon EKS hosts the Kubernetes workloads. The repository contains an ALB Ingress resource, but the AWS Load Balancer Controller and its IAM permissions must be installed/configured separately; the application manifests do not provision them. Amazon CloudWatch can be added for logs and metrics.
 
 ## Production Considerations
 
