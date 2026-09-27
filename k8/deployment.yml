@@ -2,6 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: infra-monitor-dash
+  namespace: infra-monitoring
   labels:
     app: infra-monitor-dash
 spec:

@@ -2,6 +2,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: infra-monitor-dash-service
+  namespace: infra-monitoring
 spec:
   selector:
     app: infra
