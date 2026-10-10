@@ -1,0 +1,36 @@
+replicaCount: 1
+
+image:
+  repository: 355718663378.dkr.ecr.ap-south-1.amazonaws.com/infra-monitoring/dashboard
+  tag: latest
+  pullPolicy: Always
+
+imagePullSecrets:
+  - name: ecr-registry-secret
+
+nameOverride: ""
+fullnameOverride: ""
+
+containerPort: 80
+
+env:
+  NODE_ENV: production
+
+service:
+  type: ClusterIP
+  port: 8080
+  targetPort: 80
+
+ingress:
+  enabled: true
+  className: alb
+  annotations:
+    kubernetes.io/ingress.class: alb
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+  hosts:
+    - host: ""
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
