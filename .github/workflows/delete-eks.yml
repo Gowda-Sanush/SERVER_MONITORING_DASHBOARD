@@ -1,0 +1,95 @@
+name: Delete EKS cluster
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_cluster:
+        description: Type infra-monitoring-dashboard to confirm cluster deletion
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: eks-deploy-infra-monitoring-dashboard
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: ap-south-1
+  EKS_CLUSTER_NAME: infra-monitoring-dashboard
+
+jobs:
+  delete:
+    name: Delete EKS cluster
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Require explicit cluster-name confirmation
+        env:
+          CONFIRM_CLUSTER: ${{ inputs.confirm_cluster }}
+        shell: bash
+        run: |
+          if [[ "$CONFIRM_CLUSTER" != "$EKS_CLUSTER_NAME" ]]; then
+            echo "::error::Type exactly '$EKS_CLUSTER_NAME' in the confirmation field."
+            exit 1
+          fi
+
+      - name: Configure AWS credentials with GitHub OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Check cluster status
+        id: cluster
+        shell: bash
+        run: |
+          if ! CLUSTER_STATUS="$(aws eks describe-cluster \
+            --name "$EKS_CLUSTER_NAME" \
+            --region "$AWS_REGION" \
+            --query 'cluster.status' \
+            --output text 2>"$RUNNER_TEMP/describe-cluster.err")"; then
+            if grep -q 'ResourceNotFoundException' "$RUNNER_TEMP/describe-cluster.err"; then
+              echo "Cluster $EKS_CLUSTER_NAME does not exist; nothing to delete."
+              echo "exists=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            cat "$RUNNER_TEMP/describe-cluster.err" >&2
+            exit 1
+          fi
+
+          if [[ "$CLUSTER_STATUS" != "ACTIVE" ]]; then
+            echo "::error::Cluster is '$CLUSTER_STATUS', not ACTIVE. Wait until its state is stable before deleting."
+            exit 1
+          fi
+          echo "exists=true" >> "$GITHUB_OUTPUT"
+
+      - name: Install eksctl
+        if: steps.cluster.outputs.exists == 'true'
+        shell: bash
+        run: |
+          curl --fail --silent --show-error --location \
+            "https://github.com/eksctl-io/eksctl/releases/latest/download/eksctl_Linux_amd64.tar.gz" \
+            --output /tmp/eksctl.tar.gz
+          tar -xzf /tmp/eksctl.tar.gz -C /tmp
+          sudo install /tmp/eksctl /usr/local/bin/eksctl
+          eksctl version
+
+      - name: Delete the entire cluster from eks-cluster.yml
+        if: steps.cluster.outputs.exists == 'true'
+        shell: bash
+        run: eksctl delete cluster --config-file eks-cluster.yml
+
+      - name: Report teardown completion
+        if: steps.cluster.outputs.exists == 'true'
+        shell: bash
+        run: |
+          echo "Deleted EKS cluster $EKS_CLUSTER_NAME in $AWS_REGION."
+          echo "### EKS teardown complete" >> "$GITHUB_STEP_SUMMARY"
+          echo "Deleted cluster: \`$EKS_CLUSTER_NAME\` (\`$AWS_REGION\`)." >> "$GITHUB_STEP_SUMMARY"
+          echo "Check AWS for a retained ALB, ECR images, CloudWatch log groups, and IAM resources." >> "$GITHUB_STEP_SUMMARY"
