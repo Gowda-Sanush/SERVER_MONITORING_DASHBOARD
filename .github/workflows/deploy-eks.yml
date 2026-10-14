@@ -68,137 +68,118 @@ jobs:
             --approve
           kubectl get nodes
 
-      # - name: Ensure AWS Load Balancer Controller IAM policy is configured
-      #   shell: bash
-      #   env:
-      #     AWS_LBC_POLICY_ARN: ${{ vars.AWS_LBC_POLICY_ARN }}
-      #   run: |
-      #     if [[ -z "$AWS_LBC_POLICY_ARN" ]]; then
-      #       echo "::error::Set the AWS_LBC_POLICY_ARN repository variable to the ARN of AWSLoadBalancerControllerIAMPolicy."
-      #       exit 1
-      #     fi
-      #     aws iam get-policy --policy-arn "$AWS_LBC_POLICY_ARN" >/dev/null
+      - name: Ensure AWS Load Balancer Controller IAM policy is configured
+        shell: bash
+        env:
+          AWS_LBC_POLICY_ARN: ${{ vars.AWS_LBC_POLICY_ARN }}
+        run: |
+          if [[ -z "$AWS_LBC_POLICY_ARN" ]]; then
+            echo "::error::Set the AWS_LBC_POLICY_ARN repository variable to the ARN of AWSLoadBalancerControllerIAMPolicy."
+            exit 1
+          fi
+          aws iam get-policy --policy-arn "$AWS_LBC_POLICY_ARN" >/dev/null
 
-      # - name: Check whether AWS Load Balancer Controller is already installed
-      #   id: load-balancer-controller
+      - name: Check whether AWS Load Balancer Controller is already installed
+        id: load-balancer-controller
+        shell: bash
+        run: |
+          if kubectl get deployment aws-load-balancer-controller \
+            --namespace kube-system >/dev/null 2>&1; then
+            kubectl rollout status deployment/aws-load-balancer-controller \
+              --namespace kube-system \
+              --timeout=5m
+            echo "installed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "installed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create or update Load Balancer Controller service account
+        if: steps.load-balancer-controller.outputs.installed != 'true'
+        shell: bash
+        env:
+          AWS_LBC_POLICY_ARN: ${{ vars.AWS_LBC_POLICY_ARN }}
+        run: |
+          eksctl create iamserviceaccount \
+            --cluster "$EKS_CLUSTER_NAME" \
+            --region "$AWS_REGION" \
+            --namespace kube-system \
+            --name aws-load-balancer-controller \
+            --attach-policy-arn "$AWS_LBC_POLICY_ARN" \
+            --override-existing-serviceaccounts \
+            --approve
+
+      - name: Install or upgrade AWS Load Balancer Controller
+        if: steps.load-balancer-controller.outputs.installed != 'true'
+        shell: bash
+        run: |
+          VPC_ID="$(aws eks describe-cluster \
+            --name "$EKS_CLUSTER_NAME" \
+            --region "$AWS_REGION" \
+            --query 'cluster.resourcesVpcConfig.vpcId' \
+            --output text)"
+          helm repo add eks https://aws.github.io/eks-charts --force-update
+          helm repo update eks
+          helm upgrade --install aws-load-balancer-controller \
+            eks/aws-load-balancer-controller \
+            --namespace kube-system \
+            --set "clusterName=$EKS_CLUSTER_NAME" \
+            --set "region=$AWS_REGION" \
+            --set "vpcId=$VPC_ID" \
+            --set serviceAccount.create=false \
+            --set serviceAccount.name=aws-load-balancer-controller \
+            --wait \
+            --timeout 10m
+
+      # - name: Verify the existing dashboard image
       #   shell: bash
       #   run: |
-      #     if kubectl get deployment aws-load-balancer-controller \
-      #       --namespace kube-system >/dev/null 2>&1; then
-      #       kubectl rollout status deployment/aws-load-balancer-controller \
-      #         --namespace kube-system \
-      #         --timeout=5m
-      #       echo "installed=true" >> "$GITHUB_OUTPUT"
-      #     else
-      #       echo "installed=false" >> "$GITHUB_OUTPUT"
-      #     fi
-
-      # - name: Create or update Load Balancer Controller service account
-      #   if: steps.load-balancer-controller.outputs.installed != 'true'
-      #   shell: bash
-      #   env:
-      #     AWS_LBC_POLICY_ARN: ${{ vars.AWS_LBC_POLICY_ARN }}
-      #   run: |
-      #     eksctl create iamserviceaccount \
-      #       --cluster "$EKS_CLUSTER_NAME" \
-      #       --region "$AWS_REGION" \
-      #       --namespace kube-system \
-      #       --name aws-load-balancer-controller \
-      #       --attach-policy-arn "$AWS_LBC_POLICY_ARN" \
-      #       --override-existing-serviceaccounts \
-      #       --approve
-
-      # - name: Install or upgrade AWS Load Balancer Controller
-      #   if: steps.load-balancer-controller.outputs.installed != 'true'
-      #   shell: bash
-      #   run: |
-      #     VPC_ID="$(aws eks describe-cluster \
-      #       --name "$EKS_CLUSTER_NAME" \
-      #       --region "$AWS_REGION" \
-      #       --query 'cluster.resourcesVpcConfig.vpcId' \
-      #       --output text)"
-      #     helm repo add eks https://aws.github.io/eks-charts --force-update
-      #     helm repo update eks
-      #     helm upgrade --install aws-load-balancer-controller \
-      #       eks/aws-load-balancer-controller \
-      #       --namespace kube-system \
-      #       --set "clusterName=$EKS_CLUSTER_NAME" \
-      #       --set "region=$AWS_REGION" \
-      #       --set "vpcId=$VPC_ID" \
-      #       --set serviceAccount.create=false \
-      #       --set serviceAccount.name=aws-load-balancer-controller \
-      #       --wait \
-      #       --timeout 10m
-
-      # - name: Ensure ECR repository exists
-      #   shell: bash
-      #   run: |
-      #     if ! aws ecr describe-repositories \
-      #       --repository-names "$ECR_REPOSITORY" \
-      #       --region "$AWS_REGION" >/dev/null 2>&1; then
-      #       aws ecr create-repository \
-      #         --repository-name "$ECR_REPOSITORY" \
-      #         --image-scanning-configuration scanOnPush=true \
-      #         --region "$AWS_REGION"
-      #     fi
-
-      # - name: Log in to Amazon ECR
-      #   id: ecr-login
-      #   uses: aws-actions/amazon-ecr-login@v2
-
-      # - name: Build and push dashboard image
-      #   shell: bash
-      #   env:
-      #     ECR_REGISTRY: ${{ steps.ecr-login.outputs.registry }}
-      #   run: |
-      #     IMAGE="$ECR_REGISTRY/$ECR_REPOSITORY:$GITHUB_SHA"
-      #     docker build --tag "$IMAGE" .
-      #     docker push "$IMAGE"
-      #     echo "IMAGE_REPOSITORY=$ECR_REGISTRY/$ECR_REPOSITORY" >> "$GITHUB_ENV"
-      #     echo "IMAGE_TAG=$GITHUB_SHA" >> "$GITHUB_ENV"
+      #     aws ecr describe-images \
+      #       --repository-name "$ECR_REPOSITORY" \
+      #       --image-ids imageTag=latest \
+      #       --region "$AWS_REGION" >/dev/null
 
       # - name: Create namespace and refresh ECR pull secret
       #   shell: bash
       #   run: |
       #     kubectl create namespace "$KUBERNETES_NAMESPACE" \
       #       --dry-run=client -o yaml | kubectl apply -f -
+      #     AWS_ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
+      #     ECR_REGISTRY="$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com"
       #     ECR_PASSWORD="$(aws ecr get-login-password --region "$AWS_REGION")"
       #     kubectl create secret docker-registry ecr-registry-secret \
       #       --namespace "$KUBERNETES_NAMESPACE" \
-      #       --docker-server="${{ steps.ecr-login.outputs.registry }}" \
+      #       --docker-server="$ECR_REGISTRY" \
       #       --docker-username=AWS \
       #       --docker-password="$ECR_PASSWORD" \
       #       --dry-run=client -o yaml | kubectl apply -f -
 
-      # - name: Deploy dashboard with Helm
-      #   shell: bash
-      #   run: |
-      #     helm upgrade --install infra-monitor-dash ./helm/infra-monitor-dash \
-      #       --namespace "$KUBERNETES_NAMESPACE" \
-      #       --set "image.repository=$IMAGE_REPOSITORY" \
-      #       --set "image.tag=$IMAGE_TAG" \
-      #       --wait \
-      #       --timeout 10m
-      #     kubectl rollout status deployment/infra-monitor-dash \
-      #       --namespace "$KUBERNETES_NAMESPACE" \
-      #       --timeout=5m
+      - name: Deploy existing dashboard image with Helm
+        shell: bash
+        run: |
+          helm upgrade --install infra-monitor-dash ./helm/infra-monitor-dash \
+            --namespace "$KUBERNETES_NAMESPACE" \
+            --wait \
+            --timeout 10m
+          kubectl rollout status deployment/infra-monitor-dash \
+            --namespace "$KUBERNETES_NAMESPACE" \
+            --timeout=5m
 
-      # - name: Wait for ALB address and report dashboard URL
-      #   shell: bash
-      #   run: |
-      #     for attempt in {1..30}; do
-      #       ADDRESS="$(kubectl get ingress infra-monitor-dash \
-      #         --namespace "$KUBERNETES_NAMESPACE" \
-      #         --output jsonpath='{.status.loadBalancer.ingress[0].hostname}')"
-      #       if [[ -n "$ADDRESS" ]]; then
-      #         echo "Dashboard is available at: http://$ADDRESS/app/"
-      #         echo "### Dashboard deployed" >> "$GITHUB_STEP_SUMMARY"
-      #         echo "URL: http://$ADDRESS/app/" >> "$GITHUB_STEP_SUMMARY"
-      #         exit 0
-      #       fi
-      #       echo "Waiting for the ALB address (attempt $attempt/30)..."
-      #       sleep 20
-      #     done
-      #     kubectl describe ingress infra-monitor-dash --namespace "$KUBERNETES_NAMESPACE"
-      #     echo "::error::The Ingress did not receive an ALB address within 10 minutes."
-      #     exit 1
+      - name: Wait for ALB address and report dashboard URL
+        shell: bash
+        run: |
+          for attempt in {1..30}; do
+            ADDRESS="$(kubectl get ingress infra-monitor-dash \
+              --namespace "$KUBERNETES_NAMESPACE" \
+              --output jsonpath='{.status.loadBalancer.ingress[0].hostname}')"
+            if [[ -n "$ADDRESS" ]]; then
+              echo "Dashboard is available at: http://$ADDRESS/app/"
+              echo "### Dashboard deployed" >> "$GITHUB_STEP_SUMMARY"
+              echo "URL: http://$ADDRESS/app/" >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            echo "Waiting for the ALB address (attempt $attempt/30)..."
+            sleep 20
+          done
+          kubectl describe ingress infra-monitor-dash --namespace "$KUBERNETES_NAMESPACE"
+          echo "::error::The Ingress did not receive an ALB address within 10 minutes."
+          exit 1
