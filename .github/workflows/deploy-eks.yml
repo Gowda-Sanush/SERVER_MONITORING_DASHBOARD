@@ -54,6 +54,7 @@ jobs:
             echo "Cluster $EKS_CLUSTER_NAME already exists; keeping it."
           else
             eksctl create cluster --config-file eks-cluster.yml
+            sleep 120
           fi
 
       - name: Configure kubectl and associate the cluster OIDC provider
@@ -130,19 +131,20 @@ jobs:
             --wait \
             --timeout 10m
 
-      # - name: Verify the existing dashboard image
-      #   shell: bash
-      #   run: |
-      #     aws ecr describe-images \
-      #       --repository-name "$ECR_REPOSITORY" \
-      #       --image-ids imageTag=latest \
-      #       --region "$AWS_REGION" >/dev/null
+      - name: Verify the existing dashboard image
+        shell: bash
+        run: |
+          aws ecr describe-images \
+            --repository-name "$ECR_REPOSITORY" \
+            --image-ids imageTag=latest \
+            --region "$AWS_REGION" >/dev/null
 
-      - name: Create application namespace
+      - name: Create Kubernetes namespace if it does not exist
         shell: bash
         run: |
           kubectl create namespace "$KUBERNETES_NAMESPACE" \
-            --dry-run=client -o yaml | kubectl apply -f -
+            --dry-run=client \
+            --output yaml | kubectl apply -f -
 
       - name: Deploy existing dashboard image with Helm
         shell: bash

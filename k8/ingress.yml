@@ -20,3 +20,14 @@ spec:
             name: infra-monitor-dash-service
             port:
               number: 8080
+
+
+# You install the AWS Load Balancer Controller in your EKS cluster and configure its IAM permissions. Then, when you apply your ingress.yaml, 
+# the controller automatically provisions the public ALB and its supporting AWS resources.
+
+# 1.Create EKS cluster and worker nodes.
+# 2.Create IAM policy and role for the controller, with the required trust relationship.
+# 3.Install AWS Load Balancer Controller in EKS.
+# 4.Apply your Ingress YAML with kubectl apply -f ingress.yaml.
+# 5.AWS creates the ALB and configures its listeners, target group and routing.
+# 6.Get the public URL using kubectl get ingress -n infra-monitoring.
